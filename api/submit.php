@@ -211,6 +211,19 @@ $notificationSent = false;
 $webhookUrl = getenv('N8N_WEBHOOK_URL');
 
 if (!empty($webhookUrl)) {
+    // Build CV URL for email
+    $baseUrl = getenv('APP_URL') ?: 'https://recruitment.rayandra.com';
+    $cvUrl = null;
+    $cvPreviewUrl = null;
+    
+    if (!empty($cvData['filename'])) {
+        $cvUrl = $baseUrl . '/uploads/' . $cvData['filename'];
+        // For images and PDFs, we can show preview
+        if (in_array($cvData['mimeType'], ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'])) {
+            $cvPreviewUrl = $cvUrl;
+        }
+    }
+    
     $notificationPayload = [
         'event' => 'new_application',
         'timestamp' => date('c'),
@@ -239,6 +252,13 @@ if (!empty($webhookUrl)) {
             'recommendation' => $overallResult['recommendation'],
             'technicalContribution' => $overallResult['technicalContribution'],
             'psikotesContribution' => $overallResult['psikotesContribution']
+        ],
+        'cv' => [
+            'filename' => $cvData['filename'],
+            'originalName' => $cvData['originalName'],
+            'mimeType' => $cvData['mimeType'],
+            'downloadUrl' => $cvUrl,
+            'previewUrl' => $cvPreviewUrl
         ]
     ];
     
