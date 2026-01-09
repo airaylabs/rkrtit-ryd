@@ -1,0 +1,69 @@
+{
+    "name": "Recruitment IT Email Notification v2",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "raycorp-recruitment",
+                "options": {
+                    "responseMode": "onReceived"
+                }
+            },
+            "id": "webhook-node",
+            "name": "Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                180,
+                300
+            ],
+            "webhookId": "raycorp-recruitment-v2"
+        },
+        {
+            "parameters": {
+                "jsCode": "const input = $input.first().json.body || $input.first().json;\n\nconst formatTime = (seconds) => {\n  if (!seconds || seconds <= 0) return '0m 0s';\n  const mins = Math.floor(seconds / 60);\n  const secs = Math.round(seconds % 60);\n  if (mins === 0) return `${secs}s`;\n  return `${mins}m ${secs}s`;\n};\n\nconst formatScore = (score) => (parseFloat(score) || 0).toFixed(1);\n\nconst formatWhatsAppLink = (phone) => {\n  if (!phone) return '';\n  const cleaned = phone.toString().replace(/\\D/g, '');\n  if (cleaned.startsWith('0')) return '62' + cleaned.substring(1);\n  if (cleaned.startsWith('62')) return cleaned;\n  return '62' + cleaned;\n};\n\nconst overall = parseFloat(input.scores?.overall) || 0;\nconst technical = parseFloat(input.scores?.technical) || 0;\nconst psikotes = parseFloat(input.scores?.psikotes) || 0;\n\nconst timerPersonal = parseInt(input.timer?.personal) || 0;\nconst timerTechnical = parseInt(input.timer?.technical) || 0;\nconst timerPsikotes = parseInt(input.timer?.psikotes) || 0;\nconst timerTotal = parseInt(input.timer?.total) || (timerPersonal + timerTechnical + timerPsikotes);\n\nlet kategori, kategoriEmoji, headerBg, headerBorder, badgeBg, badgeBorder, textColor, priority, followUp;\n\nif (overall >= 8) {\n  kategori = 'LULUS'; kategoriEmoji = '✅'; headerBg = '#d1fae5'; headerBorder = '#10b981';\n  badgeBg = '#d1fae5'; badgeBorder = '#10b981'; textColor = '#047857'; priority = 'HIGH';\n  followUp = '🔥 KANDIDAT SANGAT POTENSIAL! Score 8-10. Segera jadwalkan interview dalam 24-48 jam.';\n} else if (overall >= 5) {\n  kategori = 'REVIEW'; kategoriEmoji = '⚠️'; headerBg = '#fef3c7'; headerBorder = '#f59e0b';\n  badgeBg = '#fef3c7'; badgeBorder = '#f59e0b'; textColor = '#b45309'; priority = 'MEDIUM';\n  followUp = '⚡ PERLU EVALUASI LANJUT! Score 5-7.9. Pertimbangkan untuk interview dengan fokus pada area yang perlu ditingkatkan.';\n} else {\n  kategori = 'BELUM LULUS'; kategoriEmoji = '❌'; headerBg = '#fee2e2'; headerBorder = '#ef4444';\n  badgeBg = '#fee2e2'; badgeBorder = '#ef4444'; textColor = '#b91c1c'; priority = 'LOW';\n  followUp = '📋 Kandidat belum memenuhi kriteria minimum (score < 5). Simpan untuk referensi atau kirim email penolakan yang sopan.';\n}\n\nlet speedEval, speedColor, speedIcon;\nif (timerTotal <= 900) { speedEval = 'Sangat Cepat'; speedColor = '#059669'; speedIcon = '🚀'; }\nelse if (timerTotal <= 1500) { speedEval = 'Cepat & Ideal'; speedColor = '#0284c7'; speedIcon = '✅'; }\nelse if (timerTotal <= 2400) { speedEval = 'Normal'; speedColor = '#6b7280'; speedIcon = '⏱️'; }\nelse { speedEval = 'Lambat'; speedColor = '#dc2626'; speedIcon = '🐢'; }\n\nlet technicalAnalysis, psikotesAnalysis;\nif (technical >= 8) technicalAnalysis = '💪 Excellent - Kemampuan teknis sangat baik';\nelse if (technical >= 6) technicalAnalysis = '👍 Good - Kemampuan teknis memadai';\nelse if (technical >= 4) technicalAnalysis = '📚 Fair - Perlu peningkatan skill teknis';\nelse technicalAnalysis = '⚠️ Needs Improvement - Skill teknis masih kurang';\n\nif (psikotes >= 8) psikotesAnalysis = '🌟 Excellent - Soft skill & attitude sangat baik';\nelse if (psikotes >= 6) psikotesAnalysis = '👍 Good - Soft skill memadai';\nelse if (psikotes >= 4) psikotesAnalysis = '📝 Fair - Perlu evaluasi lebih lanjut';\nelse psikotesAnalysis = '⚠️ Concern - Ada potensi masalah attitude';\n\nconst whatsappNumber = formatWhatsAppLink(input.applicant?.whatsapp);\n\nreturn {\n  id: input.applicant?.id || '-',\n  nama: input.applicant?.nama || '-',\n  email: input.applicant?.email || '-',\n  whatsapp: input.applicant?.whatsapp || '-',\n  status: input.applicant?.status || '-',\n  statusLabel: input.applicant?.statusLabel || '-',\n  kategori, kategoriEmoji, headerBg, headerBorder, badgeBg, badgeBorder, textColor, priority,\n  overallScore: formatScore(overall),\n  technicalScore: formatScore(technical),\n  psikotesScore: formatScore(psikotes),\n  technicalAnalysis, psikotesAnalysis,\n  timerPersonal: formatTime(timerPersonal),\n  timerTechnical: formatTime(timerTechnical),\n  timerPsikotes: formatTime(timerPsikotes),\n  timerTotal: formatTime(timerTotal),\n  timerTotalSeconds: timerTotal,\n  speedEval, speedColor, speedIcon,\n  speedDisplay: `${speedIcon} ${speedEval}`,\n  technicalCorrect: input.details?.technicalCorrect || 0,\n  technicalTotal: input.details?.technicalTotal || 5,\n  recommendation: input.details?.recommendation || followUp,\n  technicalContribution: formatScore(input.details?.technicalContribution || (technical * 0.7)),\n  psikotesContribution: formatScore(input.details?.psikotesContribution || (psikotes * 0.3)),\n  followUp,\n  whatsappLink: whatsappNumber ? `https://wa.me/${whatsappNumber}` : '',\n  emailLink: `mailto:${input.applicant?.email || ''}`,\n  adminLink: 'https://recruitment.rayandra.com/admin/',\n  timestamp: new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }),\n  timestampShort: new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })\n};"
+            },
+            "id": "transform-node",
+            "name": "Transform Data",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                400,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Transform Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Transform Data": {
+            "main": [
+                [
+                    {
+                        "node": "Send Email",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "active": true,
+    "settings": {
+        "executionOrder": "v1"
+    },
+    "meta": {
+        "templateCredsSetupCompleted": true
+    },
+    "tags": [],
+    "_emailHtmlTemplate": "LIHAT FILE: n8n-email-template.html - Copy isi file tersebut ke field 'html' di Send Email node"
+}

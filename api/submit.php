@@ -226,6 +226,19 @@ if (!empty($webhookUrl)) {
             'overall' => $overallResult['overallScore'],
             'technical' => $technicalResult['score'],
             'psikotes' => $psikotesResult['score']
+        ],
+        'timer' => [
+            'personal' => $timerPersonal,
+            'technical' => $timerTechnical,
+            'psikotes' => $timerPsikotes,
+            'total' => $timerTotal
+        ],
+        'details' => [
+            'technicalCorrect' => $technicalResult['correctCount'],
+            'technicalTotal' => $technicalResult['totalQuestions'],
+            'recommendation' => $overallResult['recommendation'],
+            'technicalContribution' => $overallResult['technicalContribution'],
+            'psikotesContribution' => $overallResult['psikotesContribution']
         ]
     ];
     
