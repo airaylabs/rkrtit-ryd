@@ -1,0 +1,207 @@
+/**
+ * Anti-Cheating CSS Protection
+ * 
+ * Proteksi visual untuk mencegah kecurangan:
+ * - Disable text selection
+ * - Hide content when printing
+ * - Prevent image dragging
+ */
+
+/* ============================================
+   DISABLE TEXT SELECTION
+   ============================================ */
+.test-content,
+.question-container,
+.assessment-section,
+.no-select {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+
+/* Allow selection in form inputs */
+input[type="text"],
+input[type="email"],
+input[type="tel"],
+input[type="number"],
+textarea {
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
+}
+
+/* ============================================
+   DISABLE IMAGE DRAGGING
+   ============================================ */
+img {
+    -webkit-user-drag: none;
+    -khtml-user-drag: none;
+    -moz-user-drag: none;
+    -o-user-drag: none;
+    user-drag: none;
+    pointer-events: none;
+}
+
+/* ============================================
+   HIDE CONTENT WHEN PRINTING
+   ============================================ */
+@media print {
+    body * {
+        display: none !important;
+        visibility: hidden !important;
+    }
+    
+    body::before {
+        content: "⚠️ Printing is disabled for this assessment.";
+        display: block !important;
+        visibility: visible !important;
+        font-size: 24px;
+        text-align: center;
+        padding: 100px 50px;
+        color: #dc3545;
+        font-family: Arial, sans-serif;
+    }
+    
+    body::after {
+        content: "Mencetak halaman assessment tidak diperbolehkan.";
+        display: block !important;
+        visibility: visible !important;
+        font-size: 16px;
+        text-align: center;
+        padding: 20px;
+        color: #666;
+        font-family: Arial, sans-serif;
+    }
+}
+
+/* ============================================
+   ANTI-CHEAT WARNING STYLES
+   ============================================ */
+#anti-cheat-warning {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    color: white;
+    padding: 15px 25px;
+    border-radius: 8px;
+    z-index: 999999;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: 0 4px 20px rgba(220, 53, 69, 0.4);
+    animation: warningSlideIn 0.3s ease-out;
+    max-width: 90%;
+    text-align: center;
+}
+
+@keyframes warningSlideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}
+
+@keyframes warningSlideOut {
+    from {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-20px);
+    }
+}
+
+/* ============================================
+   SECURE ASSESSMENT CONTAINER
+   ============================================ */
+.secure-assessment {
+    position: relative;
+}
+
+.secure-assessment::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* ============================================
+   CODE BLOCK PROTECTION
+   ============================================ */
+pre,
+code,
+.code-snippet {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
+/* ============================================
+   QUESTION OPTIONS PROTECTION
+   ============================================ */
+.question-options label,
+.answer-option {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    cursor: pointer;
+}
+
+/* ============================================
+   OVERLAY FOR DEVTOOLS DETECTION
+   ============================================ */
+.devtools-warning-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 999998;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    color: white;
+    font-family: 'Segoe UI', Arial, sans-serif;
+}
+
+.devtools-warning-overlay h2 {
+    font-size: 28px;
+    margin-bottom: 20px;
+    color: #dc3545;
+}
+
+.devtools-warning-overlay p {
+    font-size: 16px;
+    max-width: 500px;
+    text-align: center;
+    line-height: 1.6;
+}
+
+/* ============================================
+   RESPONSIVE ADJUSTMENTS
+   ============================================ */
+@media (max-width: 768px) {
+    #anti-cheat-warning {
+        font-size: 12px;
+        padding: 12px 20px;
+        max-width: 95%;
+    }
+}
