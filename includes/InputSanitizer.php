@@ -109,4 +109,21 @@ class InputSanitizer
         $filtered = filter_var($input, FILTER_VALIDATE_FLOAT);
         return $filtered !== false ? $filtered : null;
     }
+
+    /**
+     * Sanitize text input (for textarea/long text)
+     * Preserves newlines but prevents XSS
+     *
+     * @param string $input Raw text input
+     * @return string Sanitized text
+     */
+    public static function sanitizeText(string $input): string
+    {
+        // Trim whitespace
+        $text = trim($input);
+        // Convert special characters to HTML entities
+        $text = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
+        // Preserve newlines by converting them back
+        return $text;
+    }
 }

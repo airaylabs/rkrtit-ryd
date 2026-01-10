@@ -1,14 +1,15 @@
 <?php
 /**
- * Submission API Endpoint - FINAL OPTIMIZED VERSION
+ * Submission API Endpoint - Multi-Division Recruitment System v2.0
  * 
- * Technical: 5 soal (70%)
- * Psikotes: 3 skenario (30%)
+ * Handles complete application submission including:
+ * - Position selection with track mapping
+ * - Form sections A-G (Personal, Background, Education, Value, Adab, Motivation, Availability)
+ * - Logic Test (25 questions, 7 sections) with position-based threshold
+ * - Psychology Test (5 sections A-E) with work pattern identification
+ * - Fit Score calculation and pattern mismatch detection
  * 
- * Scoring: 0-10 scale
- * - Bagus: 8-10 (LULUS)
- * - Butuh Review: 5-7 (REVIEW)
- * - Belum Lulus: <5 (TIDAK LULUS)
+ * Requirements: 2.5, 7.1, 7.2, 7.3, 7.4, 8.1, 8.2, 8.3
  */
 
 set_error_handler(function($severity, $message, $file, $line) {
@@ -25,7 +26,9 @@ require_once __DIR__ . '/../includes/ApiResponse.php';
 require_once __DIR__ . '/../includes/InputSanitizer.php';
 require_once __DIR__ . '/../includes/FileUploader.php';
 require_once __DIR__ . '/../includes/scoring.php';
-require_once __DIR__ . '/../includes/Applicant.php';
+require_once __DIR__ . '/../includes/questions.php';
+require_once __DIR__ . '/../includes/position_scoring_matrix.php';
+require_once __DIR__ . '/../config/database.php';
 
 // CORS headers
 header('Access-Control-Allow-Origin: *');
@@ -54,7 +57,8 @@ if (strpos($contentType, 'application/json') !== false) {
 } else {
     $inputData = $_POST;
     
-    $jsonFields = ['technicalAnswers', 'psikotesAnswers', 'timer'];
+    // Decode JSON fields if sent as strings
+    $jsonFields = ['logicAnswers', 'psychologyAnswers', 'timer'];
     foreach ($jsonFields as $field) {
         if (isset($inputData[$field]) && is_string($inputData[$field])) {
             $decoded = json_decode($inputData[$field], true);
@@ -65,15 +69,27 @@ if (strpos($contentType, 'application/json') !== false) {
     }
 }
 
-// Validate required fields
-$requiredFields = ['nama', 'email', 'whatsapp'];
+// ============================================
+// VALIDATE REQUIRED FIELDS
+// ============================================
+
+$requiredFields = ['nama', 'email', 'whatsapp', 'position_applied'];
 $validationErrors = InputSanitizer::validateRequired($inputData, $requiredFields);
 
 if (!empty($validationErrors)) {
     ApiResponse::validationError($validationErrors);
 }
 
-// Sanitize personal data
+// Validate position
+$positionApplied = InputSanitizer::sanitizeString($inputData['position_applied'] ?? '');
+if (!PositionScoringMatrix::isValidPosition($positionApplied)) {
+    ApiResponse::error('Invalid position selected');
+}
+
+// ============================================
+// SANITIZE PERSONAL DATA (Section A)
+// ============================================
+
 $nama = InputSanitizer::sanitizeString($inputData['nama']);
 $email = InputSanitizer::validateEmail($inputData['email']);
 $whatsapp = InputSanitizer::validatePhone($inputData['whatsapp']);
@@ -86,7 +102,14 @@ if ($whatsapp === null) {
     ApiResponse::error('Invalid phone number format');
 }
 
-// Process CV upload
+// Get position track and expected work pattern
+$positionTrack = PositionScoringMatrix::getPositionTrack($positionApplied);
+$expectedWorkPattern = PositionScoringMatrix::getExpectedWorkPattern($positionApplied);
+
+// ============================================
+// PROCESS CV UPLOAD
+// ============================================
+
 $cvData = ['filename' => null, 'originalName' => null, 'mimeType' => null];
 
 if (isset($_FILES['cv']) && $_FILES['cv']['error'] !== UPLOAD_ERR_NO_FILE) {
@@ -104,162 +127,321 @@ if (isset($_FILES['cv']) && $_FILES['cv']['error'] !== UPLOAD_ERR_NO_FILE) {
 }
 
 // ============================================
-// CALCULATE TECHNICAL SCORE (5 soal, 70%)
+// SANITIZE FORM SECTIONS (B-G)
 // ============================================
 
-$technicalAnswers = $inputData['technicalAnswers'] ?? [];
+// Section A: Personal Data (additional fields)
+$tempatLahir = InputSanitizer::sanitizeString($inputData['tempat_lahir'] ?? '');
+$tanggalLahir = !empty($inputData['tanggal_lahir']) ? $inputData['tanggal_lahir'] : null;
+$alamatDomisili = InputSanitizer::sanitizeString($inputData['alamat_domisili'] ?? '');
+$statusPernikahan = InputSanitizer::sanitizeString($inputData['status_pernikahan'] ?? '');
 
-$sanitizedTechnicalAnswers = [];
-foreach ($technicalAnswers as $questionId => $answer) {
+// Section B: Background
+$aktivitasSaatIni = InputSanitizer::sanitizeString($inputData['aktivitas_saat_ini'] ?? '');
+$pengalamanRelevan = InputSanitizer::sanitizeString($inputData['pengalaman_relevan'] ?? '');
+
+// Section C: Education
+$pendidikanInstitusi = InputSanitizer::sanitizeString($inputData['pendidikan_institusi'] ?? '');
+$pendidikanJurusan = InputSanitizer::sanitizeString($inputData['pendidikan_jurusan'] ?? '');
+$pendidikanTahunLulus = InputSanitizer::sanitizeString($inputData['pendidikan_tahun_lulus'] ?? '');
+$alasanJurusan = InputSanitizer::sanitizeString($inputData['alasan_jurusan'] ?? '');
+
+// Section D: Value & Work View
+$artiTanggungJawab = InputSanitizer::sanitizeString($inputData['arti_tanggung_jawab'] ?? '');
+$ceritaKesalahan = InputSanitizer::sanitizeString($inputData['cerita_kesalahan'] ?? '');
+$langkahTargetMinimArahan = InputSanitizer::sanitizeString($inputData['langkah_target_minim_arahan'] ?? '');
+
+// Section E: Adab & Professional Attitude
+$artiAdab = InputSanitizer::sanitizeString($inputData['arti_adab'] ?? '');
+$responTidakSepakat = InputSanitizer::sanitizeString($inputData['respon_tidak_sepakat'] ?? '');
+$caraSampaikanKritik = InputSanitizer::sanitizeString($inputData['cara_sampaikan_kritik'] ?? '');
+$pengalamanTidakAdil = InputSanitizer::sanitizeString($inputData['pengalaman_tidak_adil'] ?? '');
+$prioritasPendapatVsSikap = InputSanitizer::sanitizeString($inputData['prioritas_pendapat_vs_sikap'] ?? '');
+
+// Section F: Motivation & Benefit
+$alasanMelamar = InputSanitizer::sanitizeString($inputData['alasan_melamar'] ?? '');
+$harapanSelainGaji = InputSanitizer::sanitizeString($inputData['harapan_selain_gaji'] ?? '');
+$maknaBermanfaat = InputSanitizer::sanitizeString($inputData['makna_bermanfaat'] ?? '');
+$bertahanSaatLelah = InputSanitizer::sanitizeString($inputData['bertahan_saat_lelah'] ?? '');
+$responTidakCocokSistem = InputSanitizer::sanitizeString($inputData['respon_tidak_cocok_sistem'] ?? '');
+
+// Section G: Availability & Commitment
+$bersediaProbation = filter_var($inputData['bersedia_probation'] ?? true, FILTER_VALIDATE_BOOLEAN);
+$bersediaFeedback = filter_var($inputData['bersedia_feedback'] ?? true, FILTER_VALIDATE_BOOLEAN);
+$kapanMulai = !empty($inputData['kapan_mulai']) ? $inputData['kapan_mulai'] : null;
+$ekspektasiGaji = InputSanitizer::sanitizeFloat($inputData['ekspektasi_gaji'] ?? null);
+
+// ============================================
+// CALCULATE LOGIC TEST SCORE (25 questions)
+// Requirement 7.2, 8.1: Position-based threshold
+// ============================================
+
+$logicAnswers = $inputData['logicAnswers'] ?? [];
+
+// Sanitize logic answers
+$sanitizedLogicAnswers = [];
+foreach ($logicAnswers as $questionId => $answer) {
     $sanitizedKey = InputSanitizer::sanitizeString($questionId);
-    $sanitizedAnswer = strtoupper(trim($answer));
-    if (preg_match('/^[A-E]$/', $sanitizedAnswer)) {
-        $sanitizedTechnicalAnswers[$sanitizedKey] = $sanitizedAnswer;
+    if (is_string($answer)) {
+        $sanitizedAnswer = strtoupper(trim($answer));
+        if (preg_match('/^[A-E]$/', $sanitizedAnswer)) {
+            $sanitizedLogicAnswers[$sanitizedKey] = $sanitizedAnswer;
+        }
     }
 }
 
-$technicalScorer = new TechnicalScorer();
-$technicalResult = $technicalScorer->calculate($sanitizedTechnicalAnswers);
+$logicScorer = new LogicScorer();
+$logicResult = $logicScorer->calculate($sanitizedLogicAnswers, $positionApplied);
 
 // ============================================
-// CALCULATE PSIKOTES SCORE (3 skenario, 30%)
+// CALCULATE PSYCHOLOGY TEST SCORE (5 sections)
+// Requirement 7.3, 7.4, 8.2: Work pattern & Fit Score
 // ============================================
 
-$psikotesAnswers = $inputData['psikotesAnswers'] ?? [];
+$psychologyAnswers = $inputData['psychologyAnswers'] ?? [];
 
-$sanitizedPsikotesAnswers = [];
-foreach ($psikotesAnswers as $scenarioId => $answer) {
-    $sanitizedKey = InputSanitizer::sanitizeString($scenarioId);
-    $sanitizedAnswer = strtoupper(trim($answer));
-    if (preg_match('/^[A-E]$/', $sanitizedAnswer)) {
-        $sanitizedPsikotesAnswers[$sanitizedKey] = $sanitizedAnswer;
+// Sanitize psychology answers (more complex due to Section A interactive elements)
+$sanitizedPsychologyAnswers = [];
+foreach ($psychologyAnswers as $questionId => $answer) {
+    $sanitizedKey = InputSanitizer::sanitizeString($questionId);
+    
+    // Section A answers are objects with counts
+    if (is_array($answer)) {
+        $sanitizedPsychologyAnswers[$sanitizedKey] = [
+            'marked_count' => InputSanitizer::sanitizeInt($answer['marked_count'] ?? 0) ?? 0,
+            'circle_count' => InputSanitizer::sanitizeInt($answer['circle_count'] ?? 0) ?? 0,
+            'cross_count' => InputSanitizer::sanitizeInt($answer['cross_count'] ?? 0) ?? 0,
+        ];
+    } else {
+        // Sections B-E are multiple choice
+        $sanitizedAnswer = strtoupper(trim($answer));
+        if (preg_match('/^[A-D]$/', $sanitizedAnswer)) {
+            $sanitizedPsychologyAnswers[$sanitizedKey] = $sanitizedAnswer;
+        }
     }
 }
 
-$psikotesScorer = new PsikotesScorer();
-$psikotesResult = $psikotesScorer->calculate($sanitizedPsikotesAnswers);
-
-// ============================================
-// CALCULATE OVERALL SCORE
-// ============================================
-
-$overallResult = OverallScorer::calculate(
-    $technicalResult['score'],
-    $psikotesResult['score']
-);
+$psychologyScorer = new PsychologyScorer();
+$psychologyResult = $psychologyScorer->getFullAssessment($sanitizedPsychologyAnswers, $positionApplied);
 
 // ============================================
 // PROCESS TIMER DATA
 // ============================================
 
 $timerData = $inputData['timer'] ?? [];
-$timerPersonal = InputSanitizer::sanitizeInt($timerData['personal'] ?? 0) ?? 0;
-$timerTechnical = InputSanitizer::sanitizeInt($timerData['technical'] ?? 0) ?? 0;
-$timerPsikotes = InputSanitizer::sanitizeInt($timerData['psikotes'] ?? 0) ?? 0;
-$timerTotal = $timerPersonal + $timerTechnical + $timerPsikotes;
+$timerForm = InputSanitizer::sanitizeInt($timerData['form'] ?? 0) ?? 0;
+$timerLogic = InputSanitizer::sanitizeInt($timerData['logic'] ?? 0) ?? 0;
+$timerPsychology = InputSanitizer::sanitizeInt($timerData['psychology'] ?? 0) ?? 0;
+$timerTotal = $timerForm + $timerLogic + $timerPsychology;
+
+// ============================================
+// DETERMINE OVERALL STATUS
+// Requirement 8.3: Status determination
+// ============================================
+
+$overallStatus = determineOverallStatus(
+    $logicResult['status'],
+    $psychologyResult['fitScore'],
+    $psychologyResult['patternMismatch']
+);
 
 // ============================================
 // SAVE TO DATABASE
 // ============================================
 
-$applicantData = [
-    'nama' => $nama,
-    'email' => $email,
-    'whatsapp' => $whatsapp,
-    'cv_filename' => $cvData['filename'],
-    'cv_original_name' => $cvData['originalName'],
-    'cv_mime_type' => $cvData['mimeType'],
-    
-    // Technical scores
-    'technical_score' => $technicalResult['score'],
-    'technical_correct' => $technicalResult['correctCount'],
-    'technical_total' => $technicalResult['totalQuestions'],
-    'technical_answers' => $sanitizedTechnicalAnswers,
-    'technical_details' => $technicalResult['details'],
-    
-    // Psikotes scores
-    'psikotes_score' => $psikotesResult['score'],
-    'psikotes_categories' => $psikotesResult['categories'],
-    'psikotes_answers' => $sanitizedPsikotesAnswers,
-    'psikotes_details' => $psikotesResult['details'],
-    
-    // Overall
-    'overall_score' => $overallResult['overallScore'],
-    'status' => $overallResult['status'],
-    'status_label' => $overallResult['statusLabel'],
-    'recommendation' => $overallResult['recommendation'],
-    
-    // Timer
-    'timer_personal' => $timerPersonal,
-    'timer_technical' => $timerTechnical,
-    'timer_psikotes' => $timerPsikotes,
-    'timer_total' => $timerTotal
-];
+$applicantId = generateApplicantId($nama);
 
-$applicant = new Applicant();
-$saveResult = $applicant->create($applicantData);
+try {
+    $db = Database::getInstance();
+    $db->beginTransaction();
+    
+    $sql = "INSERT INTO applicants (
+        id,
+        -- Position
+        position_applied, position_track, expected_work_pattern,
+        -- Section A: Personal
+        nama, tempat_lahir, tanggal_lahir, alamat_domisili, whatsapp, email, status_pernikahan,
+        cv_filename, cv_original_name, cv_mime_type,
+        -- Section B: Background
+        aktivitas_saat_ini, pengalaman_relevan,
+        -- Section C: Education
+        pendidikan_institusi, pendidikan_jurusan, pendidikan_tahun_lulus, alasan_jurusan,
+        -- Section D: Value
+        arti_tanggung_jawab, cerita_kesalahan, langkah_target_minim_arahan,
+        -- Section E: Adab
+        arti_adab, respon_tidak_sepakat, cara_sampaikan_kritik, pengalaman_tidak_adil, prioritas_pendapat_vs_sikap,
+        -- Section F: Motivation
+        alasan_melamar, harapan_selain_gaji, makna_bermanfaat, bertahan_saat_lelah, respon_tidak_cocok_sistem,
+        -- Section G: Availability
+        bersedia_probation, bersedia_feedback, kapan_mulai, ekspektasi_gaji,
+        -- Logic Test Results
+        logic_score, logic_correct, logic_total, logic_threshold, logic_status, logic_answers, logic_details,
+        -- Psychology Test Results
+        psychology_pattern, psychology_placement_recommendation, psychology_fit_score, psychology_pattern_mismatch, psychology_alternative_positions,
+        psychology_section_a_score, psychology_section_b_score, psychology_section_c_score, psychology_section_d_score, psychology_section_e_score,
+        psychology_answers, psychology_details,
+        -- Timer
+        timer_form, timer_logic, timer_psychology, timer_total,
+        -- Timestamps
+        completed_at
+    ) VALUES (
+        :id,
+        :position_applied, :position_track, :expected_work_pattern,
+        :nama, :tempat_lahir, :tanggal_lahir, :alamat_domisili, :whatsapp, :email, :status_pernikahan,
+        :cv_filename, :cv_original_name, :cv_mime_type,
+        :aktivitas_saat_ini, :pengalaman_relevan,
+        :pendidikan_institusi, :pendidikan_jurusan, :pendidikan_tahun_lulus, :alasan_jurusan,
+        :arti_tanggung_jawab, :cerita_kesalahan, :langkah_target_minim_arahan,
+        :arti_adab, :respon_tidak_sepakat, :cara_sampaikan_kritik, :pengalaman_tidak_adil, :prioritas_pendapat_vs_sikap,
+        :alasan_melamar, :harapan_selain_gaji, :makna_bermanfaat, :bertahan_saat_lelah, :respon_tidak_cocok_sistem,
+        :bersedia_probation, :bersedia_feedback, :kapan_mulai, :ekspektasi_gaji,
+        :logic_score, :logic_correct, :logic_total, :logic_threshold, :logic_status, :logic_answers, :logic_details,
+        :psychology_pattern, :psychology_placement_recommendation, :psychology_fit_score, :psychology_pattern_mismatch, :psychology_alternative_positions,
+        :psychology_section_a_score, :psychology_section_b_score, :psychology_section_c_score, :psychology_section_d_score, :psychology_section_e_score,
+        :psychology_answers, :psychology_details,
+        :timer_form, :timer_logic, :timer_psychology, :timer_total,
+        NOW()
+    )";
+    
+    $stmt = $db->prepare($sql);
 
-if (!$saveResult['success']) {
+    $params = [
+        'id' => $applicantId,
+        // Position
+        'position_applied' => $positionApplied,
+        'position_track' => $positionTrack,
+        'expected_work_pattern' => $expectedWorkPattern,
+        // Section A: Personal
+        'nama' => $nama,
+        'tempat_lahir' => $tempatLahir ?: null,
+        'tanggal_lahir' => $tanggalLahir,
+        'alamat_domisili' => $alamatDomisili ?: null,
+        'whatsapp' => $whatsapp,
+        'email' => $email,
+        'status_pernikahan' => in_array($statusPernikahan, ['belum_menikah', 'menikah', 'janda_duda']) ? $statusPernikahan : null,
+        'cv_filename' => $cvData['filename'],
+        'cv_original_name' => $cvData['originalName'],
+        'cv_mime_type' => $cvData['mimeType'],
+        // Section B: Background
+        'aktivitas_saat_ini' => $aktivitasSaatIni ?: null,
+        'pengalaman_relevan' => $pengalamanRelevan ?: null,
+        // Section C: Education
+        'pendidikan_institusi' => $pendidikanInstitusi ?: null,
+        'pendidikan_jurusan' => $pendidikanJurusan ?: null,
+        'pendidikan_tahun_lulus' => $pendidikanTahunLulus ?: null,
+        'alasan_jurusan' => $alasanJurusan ?: null,
+        // Section D: Value
+        'arti_tanggung_jawab' => $artiTanggungJawab ?: null,
+        'cerita_kesalahan' => $ceritaKesalahan ?: null,
+        'langkah_target_minim_arahan' => $langkahTargetMinimArahan ?: null,
+        // Section E: Adab
+        'arti_adab' => $artiAdab ?: null,
+        'respon_tidak_sepakat' => $responTidakSepakat ?: null,
+        'cara_sampaikan_kritik' => $caraSampaikanKritik ?: null,
+        'pengalaman_tidak_adil' => $pengalamanTidakAdil ?: null,
+        'prioritas_pendapat_vs_sikap' => $prioritasPendapatVsSikap ?: null,
+        // Section F: Motivation
+        'alasan_melamar' => $alasanMelamar ?: null,
+        'harapan_selain_gaji' => $harapanSelainGaji ?: null,
+        'makna_bermanfaat' => $maknaBermanfaat ?: null,
+        'bertahan_saat_lelah' => $bertahanSaatLelah ?: null,
+        'respon_tidak_cocok_sistem' => $responTidakCocokSistem ?: null,
+        // Section G: Availability
+        'bersedia_probation' => $bersediaProbation ? 1 : 0,
+        'bersedia_feedback' => $bersediaFeedback ? 1 : 0,
+        'kapan_mulai' => $kapanMulai,
+        'ekspektasi_gaji' => $ekspektasiGaji,
+        // Logic Test Results
+        'logic_score' => $logicResult['score'],
+        'logic_correct' => $logicResult['score'],
+        'logic_total' => $logicResult['total'],
+        'logic_threshold' => $logicResult['threshold'],
+        'logic_status' => $logicResult['status'],
+        'logic_answers' => json_encode($sanitizedLogicAnswers),
+        'logic_details' => json_encode($logicResult['details']),
+        // Psychology Test Results
+        'psychology_pattern' => $psychologyResult['workPattern'],
+        'psychology_placement_recommendation' => $psychologyResult['placementRecommendation'],
+        'psychology_fit_score' => $psychologyResult['fitScore'],
+        'psychology_pattern_mismatch' => $psychologyResult['patternMismatch'] ? 1 : 0,
+        'psychology_alternative_positions' => json_encode($psychologyResult['alternativePositions']),
+        'psychology_section_a_score' => $psychologyResult['sectionScores']['section_a'] ?? 0,
+        'psychology_section_b_score' => $psychologyResult['sectionScores']['section_b'] ?? 0,
+        'psychology_section_c_score' => $psychologyResult['sectionScores']['section_c'] ?? 0,
+        'psychology_section_d_score' => $psychologyResult['sectionScores']['section_d'] ?? 0,
+        'psychology_section_e_score' => $psychologyResult['sectionScores']['section_e'] ?? 0,
+        'psychology_answers' => json_encode($sanitizedPsychologyAnswers),
+        'psychology_details' => json_encode($psychologyResult['details']),
+        // Timer
+        'timer_form' => $timerForm,
+        'timer_logic' => $timerLogic,
+        'timer_psychology' => $timerPsychology,
+        'timer_total' => $timerTotal,
+    ];
+    
+    $stmt->execute($params);
+    $db->commit();
+    
+} catch (PDOException $e) {
+    if (isset($db)) {
+        $db->rollBack();
+    }
+    error_log('Database error: ' . $e->getMessage());
     ApiResponse::serverError('Failed to save application. Please try again.');
 }
 
 // ============================================
-// SEND WEBHOOK NOTIFICATION
+// SEND WEBHOOK NOTIFICATION (Optional)
 // ============================================
 
 $notificationSent = false;
 $webhookUrl = getenv('N8N_WEBHOOK_URL');
 
 if (!empty($webhookUrl)) {
-    // Build CV URL for email
     $baseUrl = getenv('APP_URL') ?: 'https://recruitment.rayandra.com';
     $cvUrl = null;
-    $cvPreviewUrl = null;
     
     if (!empty($cvData['filename'])) {
         $cvUrl = $baseUrl . '/uploads/' . $cvData['filename'];
-        // For images and PDFs, we can show preview
-        if (in_array($cvData['mimeType'], ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'])) {
-            $cvPreviewUrl = $cvUrl;
-        }
     }
     
     $notificationPayload = [
         'event' => 'new_application',
         'timestamp' => date('c'),
         'applicant' => [
-            'id' => $saveResult['id'],
+            'id' => $applicantId,
             'nama' => $nama,
             'email' => $email,
             'whatsapp' => $whatsapp,
-            'status' => $overallResult['status'],
-            'statusLabel' => $overallResult['statusLabel']
+            'position' => PositionScoringMatrix::getPositionName($positionApplied),
+            'positionCode' => $positionApplied,
+            'positionTrack' => $positionTrack,
         ],
-        'scores' => [
-            'overall' => $overallResult['overallScore'],
-            'technical' => $technicalResult['score'],
-            'psikotes' => $psikotesResult['score']
+        'logicTest' => [
+            'score' => $logicResult['score'],
+            'total' => $logicResult['total'],
+            'threshold' => $logicResult['threshold'],
+            'status' => $logicResult['status'],
+            'statusLabel' => $logicResult['statusLabel'],
         ],
-        'timer' => [
-            'personal' => $timerPersonal,
-            'technical' => $timerTechnical,
-            'psikotes' => $timerPsikotes,
-            'total' => $timerTotal
+        'psychologyTest' => [
+            'workPattern' => $psychologyResult['workPattern'],
+            'workPatternName' => $psychologyResult['workPatternName'],
+            'fitScore' => $psychologyResult['fitScore'],
+            'patternMismatch' => $psychologyResult['patternMismatch'],
         ],
-        'details' => [
-            'technicalCorrect' => $technicalResult['correctCount'],
-            'technicalTotal' => $technicalResult['totalQuestions'],
-            'recommendation' => $overallResult['recommendation'],
-            'technicalContribution' => $overallResult['technicalContribution'],
-            'psikotesContribution' => $overallResult['psikotesContribution']
-        ],
+        'overallStatus' => $overallStatus,
         'cv' => [
             'filename' => $cvData['filename'],
             'originalName' => $cvData['originalName'],
-            'mimeType' => $cvData['mimeType'],
             'downloadUrl' => $cvUrl,
-            'previewUrl' => $cvPreviewUrl
-        ]
+        ],
+        'timer' => [
+            'form' => $timerForm,
+            'logic' => $timerLogic,
+            'psychology' => $timerPsychology,
+            'total' => $timerTotal,
+        ],
     ];
     
     $notificationSent = sendWebhookNotification($webhookUrl, $notificationPayload);
@@ -271,46 +453,161 @@ if (!empty($webhookUrl)) {
 
 ApiResponse::success([
     'message' => 'Application submitted successfully',
-    'applicantId' => $saveResult['id'],
+    'applicantId' => $applicantId,
     'notificationSent' => $notificationSent,
     'result' => [
+        // Applicant Info
         'nama' => $nama,
         'email' => $email,
-        'status' => $overallResult['status'],
-        'statusLabel' => $overallResult['statusLabel'],
-        'recommendation' => $overallResult['recommendation'],
-        'overallScore' => $overallResult['overallScore'],
+        'position' => PositionScoringMatrix::getPositionName($positionApplied),
+        'positionCode' => $positionApplied,
+        'positionTrack' => $positionTrack,
         
-        // Technical breakdown
-        'technicalScore' => $technicalResult['score'],
-        'technicalStatus' => $technicalResult['status'],
-        'technicalCorrect' => $technicalResult['correctCount'],
-        'technicalTotal' => $technicalResult['totalQuestions'],
+        // Overall Status
+        'overallStatus' => $overallStatus['status'],
+        'overallStatusLabel' => $overallStatus['label'],
         
-        // Psikotes breakdown
-        'psikotesScore' => $psikotesResult['score'],
-        'psikotesStatus' => $psikotesResult['status'],
-        'psikotesCategories' => $psikotesResult['categories'],
-        'psikotesFeedback' => $psikotesResult['feedback'],
+        // Logic Test Results
+        'logicTest' => [
+            'score' => $logicResult['score'],
+            'total' => $logicResult['total'],
+            'percentage' => $logicResult['percentage'],
+            'threshold' => $logicResult['threshold'],
+            'status' => $logicResult['status'],
+            'statusLabel' => $logicResult['statusLabel'],
+            'passedThreshold' => $logicResult['passedThreshold'],
+            'sectionScores' => $logicResult['sectionScores'],
+        ],
         
-        // Contributions
-        'technicalContribution' => $overallResult['technicalContribution'],
-        'psikotesContribution' => $overallResult['psikotesContribution'],
+        // Psychology Test Results
+        'psychologyTest' => [
+            'workPattern' => $psychologyResult['workPattern'],
+            'workPatternName' => $psychologyResult['workPatternName'],
+            'workPatternDescription' => $psychologyResult['workPatternDescription'],
+            'fitScore' => $psychologyResult['fitScore'],
+            'fitScoreLabel' => $psychologyResult['fitScoreLabel'],
+            'patternMismatch' => $psychologyResult['patternMismatch'],
+            'expectedPattern' => $psychologyResult['expectedPattern'],
+            'placementRecommendation' => $psychologyResult['placementRecommendation'],
+            'alternativePositions' => $psychologyResult['alternativePositions'],
+            'sectionScores' => $psychologyResult['sectionScores'],
+        ],
         
         // Timer
         'timer' => [
-            'personal' => $timerPersonal,
-            'technical' => $timerTechnical,
-            'psikotes' => $timerPsikotes,
-            'total' => $timerTotal
+            'form' => $timerForm,
+            'logic' => $timerLogic,
+            'psychology' => $timerPsychology,
+            'total' => $timerTotal,
         ],
         
-        // Thresholds for reference
-        'thresholds' => $overallResult['thresholds'],
-        'weights' => $overallResult['weights']
+        // Next Steps Info
+        'nextSteps' => getNextStepsMessage($overallStatus['status']),
     ]
 ]);
 
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+/**
+ * Generate unique applicant ID
+ * Format: RC-XXX00 (RC = RayCorp, XXX = first 3 letters of name, 00 = random)
+ */
+function generateApplicantId(string $nama): string
+{
+    $nameClean = preg_replace('/[^A-Za-z]/', '', $nama);
+    $namePrefix = strtoupper(substr($nameClean, 0, 3));
+    $namePrefix = str_pad($namePrefix, 3, 'X');
+    $random = str_pad(random_int(0, 99), 2, '0', STR_PAD_LEFT);
+    return "RC-{$namePrefix}{$random}";
+}
+
+/**
+ * Determine overall status based on logic test and psychology test results
+ * Requirement 8.3: Status determination
+ * 
+ * Status Logic:
+ * - Aman: Logic passed + Fit Score ≥70%
+ * - Rawan: Logic passed + (Fit Score 60-69% OR pattern mismatch)
+ * - Tidak Aman: Logic failed OR Fit Score <60%
+ */
+function determineOverallStatus(string $logicStatus, float $fitScore, bool $patternMismatch): array
+{
+    // If logic test failed, overall is tidak_aman
+    if ($logicStatus === 'tidak_aman') {
+        return [
+            'status' => 'tidak_aman',
+            'label' => 'Tidak Aman',
+            'color' => 'red',
+            'description' => 'Tidak lolos standar minimum tes logika'
+        ];
+    }
+    
+    // If fit score is below 60%, overall is tidak_aman
+    if ($fitScore < 60) {
+        return [
+            'status' => 'tidak_aman',
+            'label' => 'Tidak Aman',
+            'color' => 'red',
+            'description' => 'Fit Score di bawah 60% - tidak cocok dengan posisi yang dilamar'
+        ];
+    }
+    
+    // If logic is rawan, overall is rawan
+    if ($logicStatus === 'rawan') {
+        return [
+            'status' => 'rawan',
+            'label' => 'Rawan',
+            'color' => 'yellow',
+            'description' => 'Skor logika mendekati batas minimum'
+        ];
+    }
+    
+    // If fit score is 60-69% or pattern mismatch, overall is rawan
+    if ($fitScore < 70 || $patternMismatch) {
+        $desc = [];
+        if ($fitScore < 70) {
+            $desc[] = 'Fit Score 60-69%';
+        }
+        if ($patternMismatch) {
+            $desc[] = 'Pola kerja tidak sesuai dengan posisi';
+        }
+        
+        return [
+            'status' => 'rawan',
+            'label' => 'Rawan',
+            'color' => 'yellow',
+            'description' => implode(', ', $desc)
+        ];
+    }
+    
+    // All good - aman
+    return [
+        'status' => 'aman',
+        'label' => 'Aman',
+        'color' => 'green',
+        'description' => 'Lolos standar minimum dan cocok dengan posisi'
+    ];
+}
+
+/**
+ * Get next steps message based on overall status
+ */
+function getNextStepsMessage(string $status): string
+{
+    $messages = [
+        'aman' => 'Terima kasih telah menyelesaikan tes. Tim HR kami akan menghubungi Anda dalam 3-5 hari kerja untuk proses interview.',
+        'rawan' => 'Terima kasih telah menyelesaikan tes. Tim HR kami akan mengevaluasi hasil Anda dan menghubungi jika ada kecocokan.',
+        'tidak_aman' => 'Terima kasih telah menyelesaikan tes. Sayangnya hasil Anda belum memenuhi kriteria untuk posisi ini. Silakan coba lagi di lain waktu atau melamar posisi lain yang lebih sesuai.'
+    ];
+    
+    return $messages[$status] ?? $messages['rawan'];
+}
+
+/**
+ * Send webhook notification to n8n
+ */
 function sendWebhookNotification(string $url, array $payload): bool
 {
     $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
